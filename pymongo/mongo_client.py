@@ -13,16 +13,12 @@
 # permissions and limitations under the License.
 
 """Tools for connecting to MongoDB.
-
 .. seealso:: :doc:`/examples/high_availability` for examples of connecting
    to replica sets or sets of mongos servers.
-
 To get a :class:`~pymongo.database.Database` instance from a
 :class:`MongoClient` use either dictionary-style or attribute-style
 access:
-
 .. doctest::
-
   >>> from pymongo import MongoClient
   >>> c = MongoClient()
   >>> c.test_database
@@ -59,8 +55,6 @@ from pymongo.errors import (AutoReconnect,
                             ConfigurationError,
                             ConnectionFailure,
                             InvalidOperation,
-                            NetworkTimeout,
-                            NotMasterError,
                             OperationFailure,
                             PyMongoError,
                             ServerSelectionTimeoutError)
@@ -68,7 +62,8 @@ from pymongo.read_preferences import ReadPreference
 from pymongo.server_selectors import (writable_preferred_server_selector,
                                       writable_server_selector)
 from pymongo.server_type import SERVER_TYPE
-from pymongo.topology import Topology
+from pymongo.topology import (Topology,
+                              _ErrorContext)
 from pymongo.topology_description import TOPOLOGY_TYPE
 from pymongo.settings import TopologySettings
 from pymongo.uri_parser import (_handle_option_deprecations,
@@ -80,7 +75,6 @@ from pymongo.write_concern import DEFAULT_WRITE_CONCERN
 class MongoClient(common.BaseObject):
     """
     A client-side representation of a MongoDB cluster.
-
     Instances can represent either a standalone MongoDB server, a replica
     set, or a sharded cluster. Instances of this class are responsible for
     maintaining up-to-date state of the cluster, and possibly cache
@@ -103,14 +97,12 @@ class MongoClient(common.BaseObject):
             type_registry=None,
             **kwargs):
         """Client for a MongoDB instance, a replica set, or a set of mongoses.
-
         The client object is thread-safe and has connection-pooling built in.
         If an operation fails because of a network error,
         :class:`~pymongo.errors.ConnectionFailure` is raised and the client
         reconnects in the background. Application code should handle this
         exception (recognizing that the operation failed) and then continue to
         execute.
-
         The `host` parameter can be a full `mongodb URI
         <http://dochub.mongodb.org/core/connections>`_, in addition to
         a simple hostname. It can also be a list of hostnames or
@@ -120,29 +112,22 @@ class MongoClient(common.BaseObject):
         username, and password present will be used.  For username and
         passwords reserved characters like ':', '/', '+' and '@' must be
         percent encoded following RFC 2396::
-
             try:
                 # Python 3.x
                 from urllib.parse import quote_plus
             except ImportError:
                 # Python 2.x
                 from urllib import quote_plus
-
             uri = "mongodb://%s:%s@%s" % (
                 quote_plus(user), quote_plus(password), host)
             client = MongoClient(uri)
-
         Unix domain sockets are also supported. The socket path must be percent
         encoded in the URI::
-
             uri = "mongodb://%s:%s@%s" % (
                 quote_plus(user), quote_plus(password), quote_plus(socket_path))
             client = MongoClient(uri)
-
         But not when passed as a simple hostname::
-
             client = MongoClient('/tmp/mongodb-27017.sock')
-
         Starting with version 3.6, PyMongo supports mongodb+srv:// URIs. The
         URI must include one, and only one, hostname. The hostname will be
         resolved to one or more DNS `SRV records
@@ -156,10 +141,8 @@ class MongoClient(common.BaseObject):
         initial-dns-seedlist-discovery/initial-dns-seedlist-discovery.rst>`_
         for more details. Note that the use of SRV URIs implicitly enables
         TLS support. Pass tls=false in the URI to override.
-
         .. note:: MongoClient creation will block waiting for answers from
           DNS when mongodb+srv:// URIs are used.
-
         .. note:: Starting with version 3.0 the :class:`MongoClient`
           constructor no longer blocks while connecting to the server or
           servers, and it no longer raises
@@ -169,7 +152,6 @@ class MongoClient(common.BaseObject):
           returns immediately and launches the connection process on
           background threads. You can check if the server is available
           like this::
-
             from pymongo.errors import ConnectionFailure
             client = MongoClient()
             try:
@@ -177,14 +159,11 @@ class MongoClient(common.BaseObject):
                 client.admin.command('ismaster')
             except ConnectionFailure:
                 print("Server not available")
-
         .. warning:: When using PyMongo in a multiprocessing context, please
           read :ref:`multiprocessing` first.
-
         .. note:: Many of the following options can be passed using a MongoDB
           URI or keyword parameters. If the same option is passed in a URI and
           as a keyword parameter the keyword parameter takes precedence.
-
         :Parameters:
           - `host` (optional): hostname or IP address or Unix domain socket
             path of a single mongod or mongos instance to connect to, or a
@@ -205,9 +184,7 @@ class MongoClient(common.BaseObject):
           - `connect` (optional): if ``True`` (the default), immediately
             begin connecting to MongoDB in the background. Otherwise connect
             on the first operation.
-
           | **Other optional parameters can be passed as keyword arguments:**
-
           - `maxPoolSize` (optional): The maximum allowable number of
             concurrent connections to each connected server. Requests to a
             server will block if there are `maxPoolSize` outstanding
@@ -262,7 +239,6 @@ class MongoClient(common.BaseObject):
             executed within this MongoClient will be retried once after a
             network error on MongoDB 3.6+. Defaults to ``True``.
             The supported write operations are:
-
               - :meth:`~pymongo.collection.Collection.bulk_write`, as long as
                 :class:`~pymongo.operations.UpdateMany` or
                 :class:`~pymongo.operations.DeleteMany` are not included.
@@ -274,7 +250,6 @@ class MongoClient(common.BaseObject):
               - :meth:`~pymongo.collection.Collection.find_one_and_delete`
               - :meth:`~pymongo.collection.Collection.find_one_and_replace`
               - :meth:`~pymongo.collection.Collection.find_one_and_update`
-
             Unsupported write operations include, but are not limited to,
             :meth:`~pymongo.collection.Collection.aggregate` using the ``$out``
             pipeline operator and any operation with an unacknowledged write
@@ -297,19 +272,16 @@ class MongoClient(common.BaseObject):
             :meth:`~pymongo.database.Database.list_collections`,
             :meth:`pymongo.mongo_client.MongoClient.watch`,
             and :meth:`~pymongo.mongo_client.MongoClient.list_databases`.
-
             Unsupported read operations include, but are not limited to:
             :meth:`~pymongo.collection.Collection.map_reduce`,
             :meth:`~pymongo.collection.Collection.inline_map_reduce`,
             :meth:`~pymongo.database.Database.command`,
             and any getMore operation on a cursor.
-
             Enabling retryable reads makes applications more resilient to
             transient errors such as network failures, database upgrades, and
             replica set failovers. For an exact definition of which errors
             trigger a retry, see the `retryable reads specification
             <https://github.com/mongodb/specifications/blob/master/source/retryable-reads/retryable-reads.rst>`_.
-
           - `socketKeepAlive`: (boolean) **DEPRECATED** Whether to send
             periodic keep-alive packets on connected sockets. Defaults to
             ``True``. Disabling it is not recommended, see
@@ -335,10 +307,8 @@ class MongoClient(common.BaseObject):
             values are `pythonLegacy` (the default), `javaLegacy`,
             `csharpLegacy` and `standard`. New applications should consider
             setting this to `standard` for cross language compatibility.
-
           | **Write Concern options:**
           | (Only set if passed. No default values.)
-
           - `w`: (integer or string) If this is a replica set, write operations
             will block until they have been replicated to the specified number
             or tagged set of servers. `w=<int>` always includes the replica set
@@ -361,18 +331,14 @@ class MongoClient(common.BaseObject):
             server is running with journaling, this acts the same as the `j`
             option, blocking until write operations have been committed to the
             journal. Cannot be used in combination with `j`.
-
           | **Replica set keyword arguments for connecting with a replica set
             - either directly or via a mongos:**
-
           - `replicaSet`: (string or None) The name of the replica set to
             connect to. The driver will verify that all servers it connects to
             match this name. Implies that the hosts specified are a seed list
             and the driver should attempt to find all members of the set.
             Defaults to ``None``.
-
           | **Read Preference:**
-
           - `readPreference`: The replica set read preference for this client.
             One of ``primary``, ``primaryPreferred``, ``secondary``,
             ``secondaryPreferred``, or ``nearest``. Defaults to ``primary``.
@@ -385,21 +351,15 @@ class MongoClient(common.BaseObject):
             Defaults to ``-1``, meaning no maximum. If maxStalenessSeconds
             is set, it must be a positive integer greater than or equal to
             90 seconds.
-
           .. seealso:: :doc:`/examples/server_selection`
-
           | **Authentication:**
-
           - `username`: A string.
           - `password`: A string.
-
             Although username and password must be percent-escaped in a MongoDB
             URI, they must not be percent-escaped when passed as parameters. In
             this example, both the space and slash special characters are passed
             as-is::
-
               MongoClient(username="user name", password="pass/word")
-
           - `authSource`: The database to authenticate on. Defaults to the
             database specified in the URI, if provided, or to "admin".
           - `authMechanism`: See :data:`~pymongo.auth.MECHANISMS` for options.
@@ -411,12 +371,11 @@ class MongoClient(common.BaseObject):
           - `authMechanismProperties`: Used to specify authentication mechanism
             specific options. To specify the service name for GSSAPI
             authentication pass authMechanismProperties='SERVICE_NAME:<service
-            name>'
-
+            name>'.
+            To specify the session token for MONGODB-AWS authentication pass
+            ``authMechanismProperties='AWS_SESSION_TOKEN:<session token>'``.
           .. seealso:: :doc:`/examples/authentication`
-
           | **TLS/SSL configuration:**
-
           - `tls`: (boolean) If ``True``, create the connection to the server
             using transport layer security. Defaults to ``False``.
           - `tlsInsecure`: (boolean) Specify whether TLS constraints should be
@@ -457,6 +416,9 @@ class MongoClient(common.BaseObject):
             ``ssl_keyfile``. Only necessary if the private key is encrypted.
             Only supported by python 2.7.9+ (pypy 2.5.1+) and 3.3+. Defaults
             to ``None``.
+          - `tlsDisableOCSPEndpointCheck`: (boolean) If ``True``, disables
+            certificate revocation status checking via the OCSP responder
+            specified on the server certificate. Defaults to ``False``.
           - `ssl`: (boolean) Alias for ``tls``.
           - `ssl_certfile`: The certificate file used to identify the local
             connection against mongod. Implies ``tls=True``. Defaults to
@@ -465,32 +427,28 @@ class MongoClient(common.BaseObject):
             connection against mongod. Can be omitted if the keyfile is
             included with the ``tlsCertificateKeyFile``. Implies ``tls=True``.
             Defaults to ``None``.
-
           | **Read Concern options:**
           | (If not set explicitly, this will use the server default)
-
           - `readConcernLevel`: (string) The read concern level specifies the
             level of isolation for read operations.  For example, a read
             operation using a read concern level of ``majority`` will only
             return data that has been written to a majority of nodes. If the
             level is left unspecified, the server default will be used.
-
           | **Client side encryption options:**
           | (If not set explicitly, client side encryption will not be enabled.)
-
           - `auto_encryption_opts`: A
             :class:`~pymongo.encryption_options.AutoEncryptionOpts` which
             configures this client to automatically encrypt collection commands
             and automatically decrypt results. See
             :ref:`automatic-client-side-encryption` for an example.
-
         .. mongodoc:: connections
-
+        .. versionchanged:: 3.11
+           Added the ``tlsDisableOCSPEndpointCheck`` keyword argument and
+           URI option.
         .. versionchanged:: 3.9
            Added the ``retryReads`` keyword argument and URI option.
            Added the ``tlsInsecure`` keyword argument and URI option.
            The following keyword arguments and URI options were deprecated:
-
              - ``wTimeout`` was deprecated in favor of ``wTimeoutMS``.
              - ``j`` was deprecated in favor of ``journal``.
              - ``ssl_cert_reqs`` was deprecated in favor of
@@ -503,28 +461,22 @@ class MongoClient(common.BaseObject):
              - ``ssl_crlfile`` was deprecated in favor of ``tlsCRLFile``.
              - ``ssl_pem_passphrase`` was deprecated in favor of
                ``tlsCertificateKeyFilePassword``.
-
         .. versionchanged:: 3.9
            ``retryWrites`` now defaults to ``True``.
-
         .. versionchanged:: 3.8
            Added the ``server_selector`` keyword argument.
            Added the ``type_registry`` keyword argument.
-
         .. versionchanged:: 3.7
            Added the ``driver`` keyword argument.
-
         .. versionchanged:: 3.6
            Added support for mongodb+srv:// URIs.
            Added the ``retryWrites`` keyword argument and URI option.
-
         .. versionchanged:: 3.5
            Add ``username`` and ``password`` options. Document the
-           ``authSource``, ``authMechanism``, and ``authMechanismProperties ``
+           ``authSource``, ``authMechanism``, and ``authMechanismProperties``
            options.
            Deprecated the ``socketKeepAlive`` keyword argument and URI option.
            ``socketKeepAlive`` now defaults to ``True``.
-
         .. versionchanged:: 3.0
            :class:`~pymongo.mongo_client.MongoClient` is now the one and only
            client class for a standalone server, mongos, or replica set.
@@ -532,7 +484,6 @@ class MongoClient(common.BaseObject):
            :class:`~pymongo.mongo_client.MongoReplicaSetClient`: it can connect
            to a replica set, discover all its members, and monitor the set for
            stepdowns, elections, and reconfigs.
-
            The :class:`~pymongo.mongo_client.MongoClient` constructor no
            longer blocks while connecting to the server or servers, and it no
            longer raises :class:`~pymongo.errors.ConnectionFailure` if they
@@ -540,20 +491,15 @@ class MongoClient(common.BaseObject):
            if the user's credentials are wrong. Instead, the constructor
            returns immediately and launches the connection process on
            background threads.
-
            Therefore the ``alive`` method is removed since it no longer
            provides meaningful information; even if the client is disconnected,
            it may discover a server in time to fulfill the next operation.
-
            In PyMongo 2.x, :class:`~pymongo.MongoClient` accepted a list of
            standalone MongoDB servers and used the first it could connect to::
-
                MongoClient(['host1.com:27017', 'host2.com:27017'])
-
            A list of multiple standalones is no longer supported; if multiple
            servers are listed they must be members of the same replica set, or
            mongoses in the same sharded cluster.
-
            The behavior for a list of mongoses is changed from "high
            availability" to "load balancing". Before, the client connected to
            the lowest-latency mongos in the list, and used it until a network
@@ -562,26 +508,18 @@ class MongoClient(common.BaseObject):
            network latency to all the mongoses continuously, and distributes
            operations evenly among those with the lowest latency. See
            :ref:`mongos-load-balancing` for more information.
-
            The ``connect`` option is added.
-
            The ``start_request``, ``in_request``, and ``end_request`` methods
            are removed, as well as the ``auto_start_request`` option.
-
            The ``copy_database`` method is removed, see the
            :doc:`copy_database examples </examples/copydb>` for alternatives.
-
            The :meth:`MongoClient.disconnect` method is removed; it was a
            synonym for :meth:`~pymongo.MongoClient.close`.
-
            :class:`~pymongo.mongo_client.MongoClient` no longer returns an
            instance of :class:`~pymongo.database.Database` for attribute names
            with leading underscores. You must use dict-style lookups instead::
-
                client['__my_database__']
-
            Not::
-
                client.__my_database__
         """
         if host is None:
@@ -643,8 +581,8 @@ class MongoClient(common.BaseObject):
         # Handle deprecated options in kwarg options.
         keyword_opts = _handle_option_deprecations(keyword_opts)
         # Validate kwarg options.
-        keyword_opts = common._CaseInsensitiveDictionary(
-            dict(common.validate(k, v) for k, v in keyword_opts.items()))
+        keyword_opts = common._CaseInsensitiveDictionary(dict(common.validate(
+            keyword_opts.cased_key(k), v) for k, v in keyword_opts.items()))
 
         # Override connection string options with kwarg options.
         opts.update(keyword_opts)
@@ -731,7 +669,6 @@ class MongoClient(common.BaseObject):
 
     def _cache_credentials(self, source, credentials, connect=False):
         """Save a set of authentication credentials.
-
         The credentials are used to login a socket whenever one is created.
         If `connect` is True, verify the credentials on the server first.
         """
@@ -792,9 +729,7 @@ class MongoClient(common.BaseObject):
     def _purge_index(self, database_name,
                      collection_name=None, index_name=None):
         """Purge an index from the index cache.
-
         If `index_name` is None purge an entire collection.
-
         If `collection_name` is None purge an entire database.
         """
         with self.__index_cache_lock:
@@ -817,11 +752,9 @@ class MongoClient(common.BaseObject):
 
     def _server_property(self, attr_name):
         """An attribute of the current server's description.
-
         If the client is not connected, this will block until a connection is
         established or raise ServerSelectionTimeoutError if no server is
         available.
-
         Not threadsafe if used multiple times in a single method, since
         the server may change. In such cases, store a local reference to a
         ServerDescription first, then use its properties.
@@ -835,20 +768,15 @@ class MongoClient(common.BaseObject):
               max_await_time_ms=None, batch_size=None, collation=None,
               start_at_operation_time=None, session=None, start_after=None):
         """Watch changes on this cluster.
-
         Performs an aggregation with an implicit initial ``$changeStream``
         stage and returns a
         :class:`~pymongo.change_stream.ClusterChangeStream` cursor which
         iterates over changes on all databases on this cluster.
-
         Introduced in MongoDB 4.0.
-
         .. code-block:: python
-
            with client.watch() as stream:
                for change in stream:
                    print(change)
-
         The :class:`~pymongo.change_stream.ClusterChangeStream` iterable
         blocks until the next change document is returned or an error is
         raised. If the
@@ -857,9 +785,7 @@ class MongoClient(common.BaseObject):
         it will automatically attempt to recreate the cursor such that no
         change events are missed. Any error encountered during the resume
         attempt indicates there may be an outage and will be raised.
-
         .. code-block:: python
-
             try:
                 with client.watch(
                         [{'$match': {'operationType': 'insert'}}]) as stream:
@@ -869,10 +795,8 @@ class MongoClient(common.BaseObject):
                 # The ChangeStream encountered an unrecoverable error or the
                 # resume attempt failed to recreate the cursor.
                 logging.error('...')
-
         For a precise description of the resume process see the
         `change streams specification`_.
-
         :Parameters:
           - `pipeline` (optional): A list of aggregation pipeline stages to
             append to an initial ``$changeStream`` stage. Not all
@@ -904,17 +828,12 @@ class MongoClient(common.BaseObject):
           - `start_after` (optional): The same as `resume_after` except that
             `start_after` can resume notifications after an invalidate event.
             This option and `resume_after` are mutually exclusive.
-
         :Returns:
           A :class:`~pymongo.change_stream.ClusterChangeStream` cursor.
-
         .. versionchanged:: 3.9
            Added the ``start_after`` parameter.
-
         .. versionadded:: 3.7
-
         .. mongodoc:: changeStreams
-
         .. _change streams specification:
             https://github.com/mongodb/specifications/blob/master/source/change-streams/change-streams.rst
         """
@@ -926,7 +845,6 @@ class MongoClient(common.BaseObject):
     @property
     def event_listeners(self):
         """The event listeners registered for this client.
-
         See :mod:`~pymongo.monitoring` for details.
         """
         return self._event_listeners.event_listeners
@@ -934,15 +852,12 @@ class MongoClient(common.BaseObject):
     @property
     def address(self):
         """(host, port) of the current standalone, primary, or mongos, or None.
-
         Accessing :attr:`address` raises :exc:`~.errors.InvalidOperation` if
         the client is load-balancing among mongoses, since there is no single
         address. Use :attr:`nodes` instead.
-
         If the client is not connected, this will block until a connection is
         established or raise ServerSelectionTimeoutError if no server is
         available.
-
         .. versionadded:: 3.0
         """
         topology_type = self._topology._description.topology_type
@@ -958,11 +873,9 @@ class MongoClient(common.BaseObject):
     @property
     def primary(self):
         """The (host, port) of the current primary of the replica set.
-
         Returns ``None`` if this client is not connected to a replica set,
         there is no primary, or this client was created without the
         `replicaSet` option.
-
         .. versionadded:: 3.0
            MongoClient gained this property in version 3.0 when
            MongoReplicaSetClient's functionality was merged in.
@@ -972,11 +885,9 @@ class MongoClient(common.BaseObject):
     @property
     def secondaries(self):
         """The secondary members known to this client.
-
         A sequence of (host, port) pairs. Empty if this client is not
         connected to a replica set, there are no visible secondaries, or this
         client was created without the `replicaSet` option.
-
         .. versionadded:: 3.0
            MongoClient gained this property in version 3.0 when
            MongoReplicaSetClient's functionality was merged in.
@@ -986,7 +897,6 @@ class MongoClient(common.BaseObject):
     @property
     def arbiters(self):
         """Arbiters in the replica set.
-
         A sequence of (host, port) pairs. Empty if this client is not
         connected to a replica set, there are no arbiters, or this client was
         created without the `replicaSet` option.
@@ -996,7 +906,6 @@ class MongoClient(common.BaseObject):
     @property
     def is_primary(self):
         """If this client is connected to a server that can accept writes.
-
         True if the current server is a standalone, mongos, or the primary of
         a replica set. If the client is not connected, this will block until a
         connection is established or raise ServerSelectionTimeoutError if no
@@ -1018,7 +927,6 @@ class MongoClient(common.BaseObject):
         connected server. Requests to a server will block if there are
         `maxPoolSize` outstanding connections to the requested server.
         Defaults to 100. Cannot be 0.
-
         When a server's pool has reached `max_pool_size`, operations for that
         server block waiting for a socket to be returned to the pool. If
         ``waitQueueTimeoutMS`` is set, a blocked operation will raise
@@ -1048,7 +956,6 @@ class MongoClient(common.BaseObject):
     @property
     def nodes(self):
         """Set of all currently connected servers.
-
         .. warning:: When connected to a replica set the value of :attr:`nodes`
           can change over time as :class:`MongoClient`'s view of the replica
           set changes. :attr:`nodes` can also be an empty set when
@@ -1062,7 +969,6 @@ class MongoClient(common.BaseObject):
     @property
     def max_bson_size(self):
         """The largest BSON object the connected server accepts in bytes.
-
         If the client is not connected, this will block until a connection is
         established or raise ServerSelectionTimeoutError if no server is
         available.
@@ -1072,7 +978,6 @@ class MongoClient(common.BaseObject):
     @property
     def max_message_size(self):
         """The largest message the connected server accepts in bytes.
-
         If the client is not connected, this will block until a connection is
         established or raise ServerSelectionTimeoutError if no server is
         available.
@@ -1082,11 +987,9 @@ class MongoClient(common.BaseObject):
     @property
     def max_write_batch_size(self):
         """The maxWriteBatchSize reported by the server.
-
         If the client is not connected, this will block until a connection is
         established or raise ServerSelectionTimeoutError if no server is
         available.
-
         Returns a default value when connected to server versions prior to
         MongoDB 2.6.
         """
@@ -1149,16 +1052,13 @@ class MongoClient(common.BaseObject):
 
     def close(self):
         """Cleanup client resources and disconnect from MongoDB.
-
         On MongoDB >= 3.6, end all server sessions created by this client by
         sending one or more endSessions commands.
-
         Close all sockets in the connection pools and stop the monitor threads.
         If this instance is used again it will be automatically re-opened and
         the threads restarted unless auto encryption is enabled. A client
         enabled with auto encryption cannot be used again after being closed;
         any attempt will raise :exc:`~.errors.InvalidOperation`.
-
         .. versionchanged:: 3.6
            End all server sessions created by this client.
         """
@@ -1176,19 +1076,15 @@ class MongoClient(common.BaseObject):
 
     def set_cursor_manager(self, manager_class):
         """DEPRECATED - Set this client's cursor manager.
-
         Raises :class:`TypeError` if `manager_class` is not a subclass of
         :class:`~pymongo.cursor_manager.CursorManager`. A cursor manager
         handles closing cursors. Different managers can implement different
         policies in terms of when to actually kill a cursor that has
         been closed.
-
         :Parameters:
           - `manager_class`: cursor manager to use
-
         .. versionchanged:: 3.3
            Deprecated, for real this time.
-
         .. versionchanged:: 3.0
            Undeprecated.
         """
@@ -1205,7 +1101,6 @@ class MongoClient(common.BaseObject):
 
     def _get_topology(self):
         """Get the internal :class:`~pymongo.topology.Topology` object.
-
         If this client was created with "connect=False", calling _get_topology
         launches the connection process in the background.
         """
@@ -1216,8 +1111,7 @@ class MongoClient(common.BaseObject):
 
     @contextlib.contextmanager
     def _get_socket(self, server, session, exhaust=False):
-        with _MongoClientErrorHandler(
-                self, server.description.address, session) as err_handler:
+        with _MongoClientErrorHandler(self, server, session) as err_handler:
             with server.get_socket(
                     self.__all_credentials, checkout=exhaust) as sock_info:
                 err_handler.contribute_socket(sock_info)
@@ -1231,7 +1125,6 @@ class MongoClient(common.BaseObject):
 
     def _select_server(self, server_selector, session, address=None):
         """Select a server to run an operation on this client.
-
         :Parameters:
           - `server_selector`: The server selector to use if the session is
             not pinned and no address is given.
@@ -1281,7 +1174,7 @@ class MongoClient(common.BaseObject):
 
         with self._get_socket(server, session, exhaust=exhaust) as sock_info:
             slave_ok = (single and not sock_info.is_mongos) or (
-                read_preference != ReadPreference.PRIMARY)
+                    read_preference != ReadPreference.PRIMARY)
             yield sock_info, slave_ok
 
     @contextlib.contextmanager
@@ -1299,13 +1192,12 @@ class MongoClient(common.BaseObject):
 
         with self._get_socket(server, session) as sock_info:
             slave_ok = (single and not sock_info.is_mongos) or (
-                read_preference != ReadPreference.PRIMARY)
+                    read_preference != ReadPreference.PRIMARY)
             yield sock_info, slave_ok
 
     def _run_operation_with_response(self, operation, unpack_res,
                                      exhaust=False, address=None):
         """Run a _Query/_GetMore operation and return a Response.
-
         :Parameters:
           - `operation`: a _Query or _GetMore object.
           - `unpack_res`: A callable that decodes the wire protocol response.
@@ -1319,8 +1211,7 @@ class MongoClient(common.BaseObject):
                 operation.read_preference, operation.session, address=address)
 
             with _MongoClientErrorHandler(
-                    self, server.description.address,
-                    operation.session) as err_handler:
+                    self, server, operation.session) as err_handler:
                 err_handler.contribute_socket(operation.exhaust_mgr.sock)
                 return server.run_operation_with_response(
                     operation.exhaust_mgr.sock,
@@ -1347,10 +1238,8 @@ class MongoClient(common.BaseObject):
 
     def _retry_with_session(self, retryable, func, session, bulk):
         """Execute an operation with at most one consecutive retries
-
         Returns func()'s return value on success. On error retries the same
         command once.
-
         Re-raises any exception thrown by func().
         """
         retryable = (retryable and self.retry_writes
@@ -1360,6 +1249,7 @@ class MongoClient(common.BaseObject):
 
         def is_retrying():
             return bulk.retrying if bulk else retrying
+
         # Increment the transaction id up front to ensure any retry attempt
         # will use the proper txnNumber, even if server or socket selection
         # fails before the command can be sent.
@@ -1372,8 +1262,8 @@ class MongoClient(common.BaseObject):
             try:
                 server = self._select_server(writable_server_selector, session)
                 supports_session = (
-                    session is not None and
-                    server.description.retryable_writes_supported)
+                        session is not None and
+                        server.description.retryable_writes_supported)
                 with self._get_socket(server, session) as sock_info:
                     if retryable and not supports_session:
                         if is_retrying():
@@ -1436,10 +1326,8 @@ class MongoClient(common.BaseObject):
     def _retryable_read(self, func, read_pref, session, address=None,
                         retryable=True, exhaust=False):
         """Execute an operation with at most one consecutive retries
-
         Returns func()'s return value on success. On error retries the same
         command once.
-
         Re-raises any exception thrown by func().
         """
         retryable = (retryable and
@@ -1490,13 +1378,9 @@ class MongoClient(common.BaseObject):
         with self._tmp_session(session) as s:
             return self._retry_with_session(retryable, func, s, None)
 
-    def _reset_server(self, address):
-        """Clear our connection pool for a server and mark it Unknown."""
-        self._topology.reset_server(address)
-
-    def _reset_server_and_request_check(self, address):
+    def _handle_getlasterror(self, address, error_msg):
         """Clear our pool for a server, mark it Unknown, and check it soon."""
-        self._topology.reset_server_and_request_check(address)
+        self._topology.handle_getlasterror(address, error_msg)
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
@@ -1541,10 +1425,8 @@ class MongoClient(common.BaseObject):
 
     def __getattr__(self, name):
         """Get a database by name.
-
         Raises :class:`~pymongo.errors.InvalidName` if an invalid
         database name is used.
-
         :Parameters:
           - `name`: the name of the database to get
         """
@@ -1556,10 +1438,8 @@ class MongoClient(common.BaseObject):
 
     def __getitem__(self, name):
         """Get a database by name.
-
         Raises :class:`~pymongo.errors.InvalidName` if an invalid
         database name is used.
-
         :Parameters:
           - `name`: the name of the database to get
         """
@@ -1567,25 +1447,20 @@ class MongoClient(common.BaseObject):
 
     def close_cursor(self, cursor_id, address=None):
         """DEPRECATED - Send a kill cursors message soon with the given id.
-
         Raises :class:`TypeError` if `cursor_id` is not an instance of
         ``(int, long)``. What closing the cursor actually means
         depends on this client's cursor manager.
-
         This method may be called from a :class:`~pymongo.cursor.Cursor`
         destructor during garbage collection, so it isn't safe to take a
         lock or do network I/O. Instead, we schedule the cursor to be closed
         soon on a background thread.
-
         :Parameters:
           - `cursor_id`: id of cursor to close
           - `address` (optional): (host, port) pair of the cursor's server.
             If it is not provided, the client attempts to close the cursor on
             the primary or standalone, or a mongos server.
-
         .. versionchanged:: 3.7
            Deprecated.
-
         .. versionchanged:: 3.0
            Added ``address`` parameter.
         """
@@ -1600,7 +1475,6 @@ class MongoClient(common.BaseObject):
 
     def _close_cursor(self, cursor_id, address):
         """Send a kill cursors message with the given id.
-
         What closing the cursor actually means depends on this client's
         cursor manager. If there is none, the cursor is closed asynchronously
         on a background thread.
@@ -1612,7 +1486,6 @@ class MongoClient(common.BaseObject):
 
     def _close_cursor_now(self, cursor_id, address=None, session=None):
         """Send a kill cursors message with the given id.
-
         What closing the cursor actually means depends on this client's
         cursor manager. If there is none, the cursor is closed synchronously
         on the current thread.
@@ -1632,19 +1505,15 @@ class MongoClient(common.BaseObject):
 
     def kill_cursors(self, cursor_ids, address=None):
         """DEPRECATED - Send a kill cursors message soon with the given ids.
-
         Raises :class:`TypeError` if `cursor_ids` is not an instance of
         ``list``.
-
         :Parameters:
           - `cursor_ids`: list of cursor ids to kill
           - `address` (optional): (host, port) pair of the cursor's server.
             If it is not provided, the client attempts to close the cursor on
             the primary or standalone, or a mongos server.
-
         .. versionchanged:: 3.3
            Deprecated.
-
         .. versionchanged:: 3.0
            Now accepts an `address` argument. Schedules the cursors to be
            closed on a background thread instead of sending the message
@@ -1746,7 +1615,7 @@ class MongoClient(common.BaseObject):
         maintain connection pool parameters."""
         self._process_kill_cursors()
         try:
-            self._topology.update_pool()
+            self._topology.update_pool(self.__all_credentials)
         except Exception:
             helpers._handle_exception()
 
@@ -1769,21 +1638,16 @@ class MongoClient(common.BaseObject):
                       causal_consistency=True,
                       default_transaction_options=None):
         """Start a logical session.
-
         This method takes the same parameters as
         :class:`~pymongo.client_session.SessionOptions`. See the
         :mod:`~pymongo.client_session` module for details and examples.
-
         Requires MongoDB 3.6. It is an error to call :meth:`start_session`
         if this client has been authenticated to multiple databases using the
         deprecated method :meth:`~pymongo.database.Database.authenticate`.
-
         A :class:`~pymongo.client_session.ClientSession` may only be used with
         the MongoClient that started it.
-
         :Returns:
           An instance of :class:`~pymongo.client_session.ClientSession`.
-
         .. versionadded:: 3.6
         """
         return self.__start_session(
@@ -1855,11 +1719,9 @@ class MongoClient(common.BaseObject):
 
     def server_info(self, session=None):
         """Get information about the MongoDB server we're connected to.
-
         :Parameters:
           - `session` (optional): a
             :class:`~pymongo.client_session.ClientSession`.
-
         .. versionchanged:: 3.6
            Added ``session`` parameter.
         """
@@ -1869,7 +1731,6 @@ class MongoClient(common.BaseObject):
 
     def list_databases(self, session=None, **kwargs):
         """Get a cursor over the databases of the connected server.
-
         :Parameters:
           - `session` (optional): a
             :class:`~pymongo.client_session.ClientSession`.
@@ -1878,10 +1739,8 @@ class MongoClient(common.BaseObject):
             <https://docs.mongodb.com/manual/reference/command/listDatabases/>`_
             can be passed as keyword arguments to this method. The supported
             options differ by server version.
-
         :Returns:
           An instance of :class:`~pymongo.command_cursor.CommandCursor`.
-
         .. versionadded:: 3.6
         """
         cmd = SON([("listDatabases", 1)])
@@ -1898,11 +1757,9 @@ class MongoClient(common.BaseObject):
 
     def list_database_names(self, session=None):
         """Get a list of the names of all databases on the connected server.
-
         :Parameters:
           - `session` (optional): a
             :class:`~pymongo.client_session.ClientSession`.
-
         .. versionadded:: 3.6
         """
         return [doc["name"]
@@ -1911,14 +1768,11 @@ class MongoClient(common.BaseObject):
     def database_names(self, session=None):
         """**DEPRECATED**: Get a list of the names of all databases on the
         connected server.
-
         :Parameters:
           - `session` (optional): a
             :class:`~pymongo.client_session.ClientSession`.
-
         .. versionchanged:: 3.7
            Deprecated. Use :meth:`list_database_names` instead.
-
         .. versionchanged:: 3.6
            Added ``session`` parameter.
         """
@@ -1928,29 +1782,23 @@ class MongoClient(common.BaseObject):
 
     def drop_database(self, name_or_database, session=None):
         """Drop a database.
-
         Raises :class:`TypeError` if `name_or_database` is not an instance of
         :class:`basestring` (:class:`str` in python 3) or
         :class:`~pymongo.database.Database`.
-
         :Parameters:
           - `name_or_database`: the name of a database to drop, or a
             :class:`~pymongo.database.Database` instance representing the
             database to drop
           - `session` (optional): a
             :class:`~pymongo.client_session.ClientSession`.
-
         .. versionchanged:: 3.6
            Added ``session`` parameter.
-
         .. note:: The :attr:`~pymongo.mongo_client.MongoClient.write_concern` of
            this client is automatically applied to this operation when using
            MongoDB >= 3.4.
-
         .. versionchanged:: 3.4
            Apply this client's write concern automatically to this operation
            when connected to MongoDB >= 3.4.
-
         """
         name = name_or_database
         if isinstance(name, database.Database):
@@ -1971,19 +1819,16 @@ class MongoClient(common.BaseObject):
                 session=session)
 
     def get_default_database(self, default=None, codec_options=None,
-            read_preference=None, write_concern=None, read_concern=None):
+                             read_preference=None, write_concern=None, read_concern=None):
         """Get the database named in the MongoDB connection URI.
-
         >>> uri = 'mongodb://host/my_database'
         >>> client = MongoClient(uri)
         >>> db = client.get_default_database()
         >>> assert db.name == 'my_database'
         >>> db = client.get_database()
         >>> assert db.name == 'my_database'
-
         Useful in scripts where you want to choose which database to use
         based only on the URI in a configuration file.
-
         :Parameters:
           - `default` (optional): the database name to use if no database name
             was provided in the URI.
@@ -2003,12 +1848,10 @@ class MongoClient(common.BaseObject):
             :class:`~pymongo.read_concern.ReadConcern`. If ``None`` (the
             default) the :attr:`read_concern` of this :class:`MongoClient` is
             used.
-
         .. versionchanged:: 3.8
            Undeprecated. Added the ``default``, ``codec_options``,
            ``read_preference``, ``write_concern`` and ``read_concern``
            parameters.
-
         .. versionchanged:: 3.5
            Deprecated, use :meth:`get_database` instead.
         """
@@ -2024,11 +1867,9 @@ class MongoClient(common.BaseObject):
                      write_concern=None, read_concern=None):
         """Get a :class:`~pymongo.database.Database` with the given name and
         options.
-
         Useful for creating a :class:`~pymongo.database.Database` with
         different codec options, read preference, and/or write concern from
         this :class:`MongoClient`.
-
           >>> client.read_preference
           Primary()
           >>> db1 = client.test
@@ -2039,7 +1880,6 @@ class MongoClient(common.BaseObject):
           ...     'test', read_preference=ReadPreference.SECONDARY)
           >>> db2.read_preference
           Secondary(tag_sets=None)
-
         :Parameters:
           - `name` (optional): The name of the database - a string. If ``None``
             (the default) the database named in the MongoDB connection URI is
@@ -2060,7 +1900,6 @@ class MongoClient(common.BaseObject):
             :class:`~pymongo.read_concern.ReadConcern`. If ``None`` (the
             default) the :attr:`read_concern` of this :class:`MongoClient` is
             used.
-
         .. versionchanged:: 3.5
            The `name` parameter is now optional, defaulting to the database
            named in the MongoDB connection URI.
@@ -2092,25 +1931,19 @@ class MongoClient(common.BaseObject):
 
     def fsync(self, **kwargs):
         """Flush all pending writes to datafiles.
-
         Optional parameters can be passed as keyword arguments:
           - `lock`: If True lock the server to disallow writes.
           - `async`: If True don't block while synchronizing.
           - `session` (optional): a
             :class:`~pymongo.client_session.ClientSession`.
-
         .. note:: Starting with Python 3.7 `async` is a reserved keyword.
           The async option to the fsync command can be passed using a
           dictionary instead::
-
             options = {'async': True}
             client.fsync(**options)
-
         .. versionchanged:: 3.6
            Added ``session`` parameter.
-
         .. warning:: `async` and `lock` can not be used together.
-
         .. warning:: MongoDB does not support the `async` option
                      on Windows and will raise an exception on that
                      platform.
@@ -2120,11 +1953,9 @@ class MongoClient(common.BaseObject):
 
     def unlock(self, session=None):
         """Unlock a previously locked server.
-
         :Parameters:
           - `session` (optional): a
             :class:`~pymongo.client_session.ClientSession`.
-
         .. versionchanged:: 3.6
            Added ``session`` parameter.
         """
@@ -2162,18 +1993,24 @@ class MongoClient(common.BaseObject):
 
 class _MongoClientErrorHandler(object):
     """Error handler for MongoClient."""
-    __slots__ = ('_client', '_server_address', '_session', '_max_wire_version')
+    __slots__ = ('_client', '_server_address', '_session',
+                 '_max_wire_version', '_sock_generation')
 
-    def __init__(self, client, server_address, session):
+    def __init__(self, client, server, session):
         self._client = client
-        self._server_address = server_address
+        self._server_address = server.description.address
         self._session = session
-        self._max_wire_version = None
+        self._max_wire_version = common.MIN_WIRE_VERSION
+        # XXX: When get_socket fails, this generation could be out of date:
+        # "Note that when a network error occurs before the handshake
+        # completes then the error's generation number is the generation
+        # of the pool at the time the connection attempt was started."
+        self._sock_generation = server.pool.generation
 
     def contribute_socket(self, sock_info):
         """Provide socket information to the error handler."""
-        # Currently, we only extract the max_wire_version information.
         self._max_wire_version = sock_info.max_wire_version
+        self._sock_generation = sock_info.generation
 
     def __enter__(self):
         return self
@@ -2182,45 +2019,15 @@ class _MongoClientErrorHandler(object):
         if exc_type is None:
             return
 
+        err_ctx = _ErrorContext(
+            exc_val, self._max_wire_version, self._sock_generation)
+        self._client._topology.handle_error(self._server_address, err_ctx)
+
         if issubclass(exc_type, PyMongoError):
             if self._session and exc_val.has_error_label(
                     "TransientTransactionError"):
                 self._session._unpin_mongos()
 
-        if issubclass(exc_type, NetworkTimeout):
-            # The socket has been closed. Don't reset the server.
-            # Server Discovery And Monitoring Spec: "When an application
-            # operation fails because of any network error besides a socket
-            # timeout...."
+        if issubclass(exc_type, ConnectionFailure):
             if self._session:
                 self._session._server_session.mark_dirty()
-        elif issubclass(exc_type, NotMasterError):
-            # As per the SDAM spec if:
-            #   - the server sees a "not master" error, and
-            #   - the server is not shutting down, and
-            #   - the server version is >= 4.2, then
-            # we keep the existing connection pool, but mark the server type
-            # as Unknown and request an immediate check of the server.
-            # Otherwise, we clear the connection pool, mark the server as
-            # Unknown and request an immediate check of the server.
-            err_code = exc_val.details.get('code', -1)
-            is_shutting_down = err_code in helpers._SHUTDOWN_CODES
-            if (is_shutting_down or (self._max_wire_version is None) or
-                    (self._max_wire_version <= 7)):
-                # Clear the pool, mark server Unknown and request check.
-                self._client._reset_server_and_request_check(
-                    self._server_address)
-            else:
-                self._client._topology.mark_server_unknown_and_request_check(
-                    self._server_address)
-        elif issubclass(exc_type, ConnectionFailure):
-            # "Client MUST replace the server's description with type Unknown
-            # ... MUST NOT request an immediate check of the server."
-            self._client._reset_server(self._server_address)
-            if self._session:
-                self._session._server_session.mark_dirty()
-        elif issubclass(exc_type, OperationFailure):
-            # Do not request an immediate check since the server is likely
-            # shutting down.
-            if exc_val.code in helpers._RETRYABLE_ERROR_CODES:
-                self._client._reset_server(self._server_address)
